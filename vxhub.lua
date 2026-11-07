@@ -1,18 +1,19 @@
 
--- Lua | FullCodeScanner.client.lua | Roblox Studio
+-- Lua | AnnouncementScanner.client.lua | Roblox Studio
 
 local Players = game:GetService("Players")
 local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- SETTINGS
-local WORD_LIMIT = 3
 local enabled = false
 local busy = false
 local collected_words = {}
-local latest_message = ""
+local history = {}
+
+local WORD_LIMIT = 3
 
 -- FIND CODES UI
 local function find_codes_ui()
@@ -23,7 +24,6 @@ local function find_codes_ui()
 
             if redeem and redeem:IsA("TextBox")
                 and confirm and confirm:IsA("GuiButton") then
-
                 return redeem, confirm
             end
         end
@@ -34,7 +34,7 @@ end
 
 -- MAIN GUI
 local gui = Instance.new("ScreenGui")
-gui.Name = "AnnouncementCodeScanner"
+gui.Name = "AnnouncementScanner"
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
@@ -44,12 +44,14 @@ frame.Size = UDim2.fromOffset(340, 300)
 frame.Position = UDim2.new(0, 20, 0.5, -150)
 frame.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
 frame.BorderSizePixel = 0
+frame.Active = true
 frame.Parent = gui
 
 local corner = Instance.new("UICorner")
 corner.CornerRadius = UDim.new(0, 10)
 corner.Parent = frame
 
+-- TITLE / DRAG HANDLE
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -20, 0, 35)
 title.Position = UDim2.fromOffset(10, 5)
@@ -60,7 +62,44 @@ title.Font = Enum.Font.GothamBold
 title.TextSize = 16
 title.Parent = frame
 
--- ON/OFF BUTTON
+-- DRAGGING
+local dragging = false
+local drag_start
+local start_position
+
+title.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        drag_start = input.Position
+        start_position = frame.Position
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - drag_start
+
+        frame.Position = UDim2.new(
+            start_position.X.Scale,
+            start_position.X.Offset + delta.X,
+            start_position.Y.Scale,
+            start_position.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- TOGGLE BUTTON
 local toggle = Instance.new("TextButton")
 toggle.Size = UDim2.new(1, -20, 0, 38)
 toggle.Position = UDim2.fromOffset(10, 45)
@@ -71,13 +110,13 @@ toggle.Font = Enum.Font.GothamBold
 toggle.TextSize = 14
 toggle.Parent = frame
 
-local function make_corner(object)
+local function corner_object(object)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, 6)
     c.Parent = object
 end
 
-make_corner(toggle)
+corner_object(toggle)
 
 -- STATUS
 local status = Instance.new("TextLabel")
@@ -103,7 +142,7 @@ latest.Font = Enum.Font.Code
 latest.TextSize = 13
 latest.Parent = frame
 
-make_corner(latest)
+corner_object(latest)
 
 -- ACTIVITY LOG
 local log = Instance.new("TextLabel")
@@ -119,11 +158,9 @@ log.Font = Enum.Font.Code
 log.TextSize = 12
 log.Parent = frame
 
-make_corner(log)
+corner_object(log)
 
 -- LOGGING
-local history = {}
-
 local function add_log(message)
     table.insert(history, message)
 
@@ -134,7 +171,7 @@ local function add_log(message)
     log.Text = table.concat(history, "\n")
 end
 
--- TOGGLE
+-- SCANNER ON/OFF
 toggle.MouseButton1Click:Connect(function()
     enabled = not enabled
 
@@ -152,7 +189,7 @@ toggle.MouseButton1Click:Connect(function()
     end
 end)
 
--- PROCESS ANNOUNCEMENT
+-- ANNOUNCEMENT PROCESSING
 local function process_message(message)
     if not enabled or busy then
         return
@@ -164,9 +201,7 @@ local function process_message(message)
         return
     end
 
-    latest_message = message
     latest.Text = message
-
     add_log("[MESSAGE FOUND] " .. message)
 
     for word in message:gmatch("%S+") do
@@ -175,7 +210,10 @@ local function process_message(message)
         if #collected_words >= WORD_LIMIT then
             busy = true
 
-            local code = table.concat(collected_words, " ", 1, WORD_LIMIT)
+            local code = table.concat(
+                collected_words, " ", 1, WORD_LIMIT
+            )
+
             table.clear(collected_words)
 
             add_log("[CODE READY] " .. code)
@@ -184,7 +222,7 @@ local function process_message(message)
 
             if not redeem or not confirm then
                 status.Text = "Codes UI not found"
-                add_log("[ERROR] CodeRedeem/Confirm missing")
+                add_log("[ERROR] UI missing")
                 busy = false
                 return
             end
@@ -209,27 +247,22 @@ local function process_message(message)
         .. #collected_words .. "/" .. WORD_LIMIT
 end
 
--- ROBLOX CHAT LISTENER
 TextChatService.MessageReceived:Connect(function(message)
     if enabled then
         process_message(message.Text)
     end
 end)
 
--- INITIAL CHECK
-task.spawn(function()
-    while gui.Parent do
-        if enabled then
-            local redeem, confirm = find_codes_ui()
+-- K TO HIDE / SHOW
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then
+        return
+    end
 
-            if not redeem or not confirm then
-                status.Text = "Waiting for Codes UI..."
-            end
-        end
-
-        task.wait(2)
+    if input.KeyCode == Enum.KeyCode.K then
+        frame.Visible = not frame.Visible
     end
 end)
 
 add_log("[SYSTEM] Scanner initialized")
-add_log("[SYSTEM] Waiting for activation")
+add_log("[SYSTEM] Press K to hide/show")
