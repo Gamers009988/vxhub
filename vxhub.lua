@@ -1,319 +1,235 @@
 
--- Luau, LocalItemManager.client.lua
--- Runtime: Roblox LocalScript, StarterPlayerScripts
+-- Lua | FullCodeScanner.client.lua | Roblox Studio
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterPack = game:GetService("StarterPack")
-local StarterGui = game:GetService("StarterGui")
-local LocalPlayer = Players.LocalPlayer
+local TextChatService = game:GetService("TextChatService")
 
-local OWNER_ID = 4616869387
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
-if LocalPlayer.UserId ~= OWNER_ID then
-    warn("[ITEM MANAGER] Owner verification failed")
-    return
+-- SETTINGS
+local WORD_LIMIT = 3
+local enabled = false
+local busy = false
+local collected_words = {}
+local latest_message = ""
+
+-- FIND CODES UI
+local function find_codes_ui()
+    for _, object in ipairs(playerGui:GetDescendants()) do
+        if object:IsA("Frame") and object.Name == "Codes" then
+            local redeem = object:FindFirstChild("CodeRedeem", true)
+            local confirm = object:FindFirstChild("Confirm", true)
+
+            if redeem and redeem:IsA("TextBox")
+                and confirm and confirm:IsA("GuiButton") then
+
+                return redeem, confirm
+            end
+        end
+    end
+
+    return nil, nil
 end
 
-local player_gui = LocalPlayer:WaitForChild("PlayerGui")
-
--- GUI
-
+-- MAIN GUI
 local gui = Instance.new("ScreenGui")
-gui.Name = "LocalItemManager"
+gui.Name = "AnnouncementCodeScanner"
 gui.ResetOnSpawn = false
-gui.Parent = player_gui
+gui.Parent = playerGui
 
-local function create(class, props, parent)
-    local object = Instance.new(class)
+local frame = Instance.new("Frame")
+frame.Name = "Main"
+frame.Size = UDim2.fromOffset(340, 300)
+frame.Position = UDim2.new(0, 20, 0.5, -150)
+frame.BackgroundColor3 = Color3.fromRGB(22, 24, 30)
+frame.BorderSizePixel = 0
+frame.Parent = gui
 
-    for key, value in pairs(props) do
-        object[key] = value
-    end
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = frame
 
-    object.Parent = parent
-    return object
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -20, 0, 35)
+title.Position = UDim2.fromOffset(10, 5)
+title.BackgroundTransparency = 1
+title.Text = "ANNOUNCEMENT SNIPER"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = frame
+
+-- ON/OFF BUTTON
+local toggle = Instance.new("TextButton")
+toggle.Size = UDim2.new(1, -20, 0, 38)
+toggle.Position = UDim2.fromOffset(10, 45)
+toggle.BackgroundColor3 = Color3.fromRGB(155, 40, 40)
+toggle.Text = "SNIPER: OFF"
+toggle.TextColor3 = Color3.new(1, 1, 1)
+toggle.Font = Enum.Font.GothamBold
+toggle.TextSize = 14
+toggle.Parent = frame
+
+local function make_corner(object)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = object
 end
 
-local main = create("Frame", {
-    Size = UDim2.fromOffset(680, 480),
-    Position = UDim2.new(0.5, -340, 0.5, -240),
-    BackgroundColor3 = Color3.fromRGB(22, 23, 29),
-    BorderSizePixel = 0
-}, gui)
+make_corner(toggle)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 10)
-}, main)
+-- STATUS
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 25)
+status.Position = UDim2.fromOffset(10, 88)
+status.BackgroundTransparency = 1
+status.Text = "Status: Disabled"
+status.TextColor3 = Color3.fromRGB(180, 180, 180)
+status.Font = Enum.Font.Gotham
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = frame
 
-create("TextLabel", {
-    Size = UDim2.new(1, -60, 0, 45),
-    Position = UDim2.fromOffset(15, 5),
-    BackgroundTransparency = 1,
-    Text = "LOCAL ITEM MANAGER",
-    TextColor3 = Color3.new(1, 1, 1),
-    Font = Enum.Font.GothamBold,
-    TextSize = 20,
-    TextXAlignment = Enum.TextXAlignment.Left
-}, main)
+-- LATEST MESSAGE
+local latest = Instance.new("TextLabel")
+latest.Size = UDim2.new(1, -20, 0, 65)
+latest.Position = UDim2.fromOffset(10, 115)
+latest.BackgroundColor3 = Color3.fromRGB(35, 38, 46)
+latest.TextColor3 = Color3.fromRGB(100, 255, 150)
+latest.Text = "Waiting for announcement..."
+latest.TextWrapped = true
+latest.Font = Enum.Font.Code
+latest.TextSize = 13
+latest.Parent = frame
 
-local close = create("TextButton", {
-    Position = UDim2.new(1, -42, 0, 10),
-    Size = UDim2.fromOffset(30, 30),
-    Text = "X",
-    BackgroundColor3 = Color3.fromRGB(160, 45, 45),
-    TextColor3 = Color3.new(1, 1, 1),
-    Font = Enum.Font.GothamBold,
-    TextSize = 14
-}, main)
+make_corner(latest)
 
-close.MouseButton1Click:Connect(function()
-    gui:Destroy()
-end)
+-- ACTIVITY LOG
+local log = Instance.new("TextLabel")
+log.Size = UDim2.new(1, -20, 0, 105)
+log.Position = UDim2.fromOffset(10, 190)
+log.BackgroundColor3 = Color3.fromRGB(13, 14, 18)
+log.TextColor3 = Color3.fromRGB(220, 220, 220)
+log.Text = "[SYSTEM] Ready"
+log.TextWrapped = true
+log.TextXAlignment = Enum.TextXAlignment.Left
+log.TextYAlignment = Enum.TextYAlignment.Top
+log.Font = Enum.Font.Code
+log.TextSize = 12
+log.Parent = frame
 
-local status = create("TextLabel", {
-    Position = UDim2.fromOffset(15, 48),
-    Size = UDim2.new(1, -30, 0, 25),
-    BackgroundTransparency = 1,
-    Text = "OWNER VERIFIED | " .. OWNER_ID,
-    TextColor3 = Color3.fromRGB(90, 190, 130),
-    Font = Enum.Font.Gotham,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left
-}, main)
+make_corner(log)
 
--- ITEM LIST
+-- LOGGING
+local history = {}
 
-local item_panel = create("ScrollingFrame", {
-    Position = UDim2.fromOffset(15, 90),
-    Size = UDim2.fromOffset(420, 340),
-    BackgroundColor3 = Color3.fromRGB(30, 31, 39),
-    BorderSizePixel = 0,
-    ScrollBarThickness = 6,
-    CanvasSize = UDim2.new()
-}, main)
+local function add_log(message)
+    table.insert(history, message)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 7)
-}, item_panel)
+    while #history > 7 do
+        table.remove(history, 1)
+    end
 
-local layout = create("UIListLayout", {
-    Padding = UDim.new(0, 5),
-    SortOrder = Enum.SortOrder.LayoutOrder
-}, item_panel)
-
-layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    item_panel.CanvasSize = UDim2.fromOffset(
-        0,
-        layout.AbsoluteContentSize.Y + 10
-    )
-end)
-
--- DETAILS PANEL
-
-local details = create("Frame", {
-    Position = UDim2.fromOffset(450, 90),
-    Size = UDim2.fromOffset(215, 340),
-    BackgroundColor3 = Color3.fromRGB(30, 31, 39),
-    BorderSizePixel = 0
-}, main)
-
-create("UICorner", {
-    CornerRadius = UDim.new(0, 7)
-}, details)
-
-local selected_label = create("TextLabel", {
-    Position = UDim2.fromOffset(10, 10),
-    Size = UDim2.new(1, -20, 0, 65),
-    BackgroundTransparency = 1,
-    Text = "NO ITEM SELECTED",
-    TextColor3 = Color3.new(1, 1, 1),
-    TextWrapped = true,
-    Font = Enum.Font.GothamBold,
-    TextSize = 14
-}, details)
-
-local function make_button(text, y, color)
-    return create("TextButton", {
-        Position = UDim2.fromOffset(10, y),
-        Size = UDim2.new(1, -20, 0, 38),
-        BackgroundColor3 = color,
-        Text = text,
-        TextColor3 = Color3.new(1, 1, 1),
-        Font = Enum.Font.GothamBold,
-        TextSize = 12
-    }, details)
+    log.Text = table.concat(history, "\n")
 end
 
-local scan_button = make_button(
-    "SCAN AGAIN", 90, Color3.fromRGB(45, 110, 180)
-)
+-- TOGGLE
+toggle.MouseButton1Click:Connect(function()
+    enabled = not enabled
 
-local inspect_button = make_button(
-    "INSPECT ITEM", 140, Color3.fromRGB(65, 80, 110)
-)
-
-local give_button = make_button(
-    "GIVE TO MYSELF", 190, Color3.fromRGB(40, 145, 90)
-)
-
-local selected_tool = nil
-
--- RECURSIVE SCANNER
-
-local function scan()
-    for _, child in ipairs(item_panel:GetChildren()) do
-        if child:IsA("TextButton") then
-            child:Destroy()
-        end
-    end
-
-    selected_tool = nil
-    selected_label.Text = "NO ITEM SELECTED"
-
-    local locations = {
-        workspace,
-        ReplicatedStorage,
-        StarterPack,
-        StarterGui,
-        LocalPlayer:WaitForChild("Backpack")
-    }
-
-    if LocalPlayer.Character then
-        table.insert(locations, LocalPlayer.Character)
-    end
-
-    local found = {}
-
-    for _, location in ipairs(locations) do
-        for _, object in ipairs(location:GetDescendants()) do
-            if object:IsA("Tool") then
-                found[object] = true
-            end
-        end
-    end
-
-    -- ServerStorage visibility diagnostic.
-    -- Its contents normally cannot replicate to LocalScripts.
-
-    local server_storage = game:GetService("ServerStorage")
-
-    local accessible, server_objects = pcall(function()
-        return server_storage:GetDescendants()
-    end)
-
-    if accessible then
-        for _, object in ipairs(server_objects) do
-            if object:IsA("Tool") then
-                found[object] = true
-            end
-        end
-    end
-
-    local sorted = {}
-
-    for tool in pairs(found) do
-        table.insert(sorted, tool)
-    end
-
-    table.sort(sorted, function(a, b)
-        return a:GetFullName():lower() < b:GetFullName():lower()
-    end)
-
-    for index, tool in ipairs(sorted) do
-        local button = create("TextButton", {
-            Name = "Item_" .. index,
-            LayoutOrder = index,
-            Size = UDim2.new(1, -10, 0, 46),
-            BackgroundColor3 = Color3.fromRGB(43, 45, 55),
-            Text = "  " .. tool.Name .. "\n  " .. tool:GetFullName(),
-            TextColor3 = Color3.new(1, 1, 1),
-            TextSize = 11,
-            TextWrapped = true,
-            Font = Enum.Font.Gotham,
-            TextXAlignment = Enum.TextXAlignment.Left
-        }, item_panel)
-
-        create("UICorner", {
-            CornerRadius = UDim.new(0, 5)
-        }, button)
-
-        button.MouseButton1Click:Connect(function()
-            selected_tool = tool
-            selected_label.Text =
-                "SELECTED ITEM\n" .. tool.Name
-
-            status.Text = "SELECTED: " .. tool.Name
-        end)
-    end
-
-    status.Text = "SCAN COMPLETE | " .. #sorted .. " TOOLS FOUND"
-
-    print("--------------------------------")
-    print("[ITEM MANAGER] SCAN COMPLETE")
-    print("[ITEM MANAGER] Tools found:", #sorted)
-    print("[ITEM MANAGER] ServerStorage accessible:", accessible)
-    print("--------------------------------")
-end
-
--- INSPECT
-
-inspect_button.MouseButton1Click:Connect(function()
-    if not selected_tool or not selected_tool.Parent then
-        status.Text = "SELECT AN ITEM FIRST"
-        return
-    end
-
-    print("[ITEM MANAGER] ITEM:", selected_tool.Name)
-    print("[ITEM MANAGER] PATH:", selected_tool:GetFullName())
-
-    status.Text = "INSPECTED: " .. selected_tool.Name
-end)
-
--- GIVE TO SELF
--- Only makes a local copy of an accessible Tool.
-
-give_button.MouseButton1Click:Connect(function()
-    if not selected_tool or not selected_tool.Parent then
-        status.Text = "SELECT AN ITEM FIRST"
-        return
-    end
-
-    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
-
-    if not backpack then
-        status.Text = "BACKPACK NOT FOUND"
-        return
-    end
-
-    if selected_tool:IsDescendantOf(backpack) then
-        status.Text = "ALREADY IN BACKPACK"
-        return
-    end
-
-    local character = LocalPlayer.Character
-
-    if character and selected_tool:IsDescendantOf(character) then
-        status.Text = "ALREADY EQUIPPED"
-        return
-    end
-
-    local success, result = pcall(function()
-        local clone = selected_tool:Clone()
-        clone.Parent = backpack
-    end)
-
-    if success then
-        status.Text = "LOCAL COPY CREATED"
-        print("[ITEM MANAGER] Local copy:", selected_tool.Name)
+    if enabled then
+        toggle.Text = "SNIPER: ON"
+        toggle.BackgroundColor3 = Color3.fromRGB(35, 145, 65)
+        status.Text = "Status: Listening"
+        add_log("[SNIPER] ON")
     else
-        status.Text = "COPY FAILED: " .. tostring(result)
+        toggle.Text = "SNIPER: OFF"
+        toggle.BackgroundColor3 = Color3.fromRGB(155, 40, 40)
+        status.Text = "Status: Disabled"
+        table.clear(collected_words)
+        add_log("[SNIPER] OFF")
     end
 end)
 
--- INITIAL SCAN
+-- PROCESS ANNOUNCEMENT
+local function process_message(message)
+    if not enabled or busy then
+        return
+    end
 
-scan()
+    message = tostring(message)
 
-print("[ITEM MANAGER] Initialized")
-print("[ITEM MANAGER] Owner:", LocalPlayer.UserId)
+    if message == "" then
+        return
+    end
+
+    latest_message = message
+    latest.Text = message
+
+    add_log("[MESSAGE FOUND] " .. message)
+
+    for word in message:gmatch("%S+") do
+        table.insert(collected_words, word)
+
+        if #collected_words >= WORD_LIMIT then
+            busy = true
+
+            local code = table.concat(collected_words, " ", 1, WORD_LIMIT)
+            table.clear(collected_words)
+
+            add_log("[CODE READY] " .. code)
+
+            local redeem, confirm = find_codes_ui()
+
+            if not redeem or not confirm then
+                status.Text = "Codes UI not found"
+                add_log("[ERROR] CodeRedeem/Confirm missing")
+                busy = false
+                return
+            end
+
+            redeem.Text = code
+            status.Text = "Three words entered"
+
+            task.wait(0.2)
+
+            if enabled and confirm.Parent then
+                confirm:Activate()
+                add_log("[CONFIRM] Activated")
+            end
+
+            task.wait(0.5)
+            busy = false
+            return
+        end
+    end
+
+    status.Text = "Collecting: "
+        .. #collected_words .. "/" .. WORD_LIMIT
+end
+
+-- ROBLOX CHAT LISTENER
+TextChatService.MessageReceived:Connect(function(message)
+    if enabled then
+        process_message(message.Text)
+    end
+end)
+
+-- INITIAL CHECK
+task.spawn(function()
+    while gui.Parent do
+        if enabled then
+            local redeem, confirm = find_codes_ui()
+
+            if not redeem or not confirm then
+                status.Text = "Waiting for Codes UI..."
+            end
+        end
+
+        task.wait(2)
+    end
+end)
+
+add_log("[SYSTEM] Scanner initialized")
+add_log("[SYSTEM] Waiting for activation")
